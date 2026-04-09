@@ -5,31 +5,46 @@ import Dashboard from './pages/Dashboard';
 import Profile from './pages/Profile';
 import Leaderboard from './pages/Leaderboard';
 import Auth from './pages/Auth';
+import Onboarding from './pages/Onboarding'; // <-- Add this import
+import Social from './pages/Social';
 
-// A helper component to protect routes
 function ProtectedRoute({ children }) {
-  const { currentUser } = useAuth();
+  const { currentUser, userData } = useAuth();
+  
   if (!currentUser) return <Navigate to="/auth" />;
+  
+  // If they are logged in but haven't finished onboarding, force them there
+  if (userData && userData.onboardingCompleted === false) {
+    return <Navigate to="/onboarding" />;
+  }
+  
   return children;
 }
 
-// The main routing logic extracted into a child so it can use the Auth context
 function AppRoutes() {
-  const { currentUser } = useAuth();
+  const { currentUser, userData } = useAuth();
 
   return (
     <Routes>
-      {/* If logged in, send them to dashboard. If not, show auth. */}
       <Route path="/auth" element={currentUser ? <Navigate to="/" /> : <Auth />} />
       
-      {/* Protected Routes wrapped in our Layout */}
+      {/* Protect the onboarding route so only logged in, incomplete users can see it */}
+      <Route 
+        path="/onboarding" 
+        element={
+          (!currentUser) ? <Navigate to="/auth" /> : 
+          (userData?.onboardingCompleted) ? <Navigate to="/" /> : 
+          <Onboarding />
+        } 
+      />
+      
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/social" element={<Social />} />       
         <Route path="/profile" element={<Profile />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
       </Route>
 
-      {/* Catch-all */}
       <Route path="*" element={<Navigate to={currentUser ? "/" : "/auth"} />} />
     </Routes>
   );
