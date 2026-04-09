@@ -44,7 +44,7 @@ export default function Auth() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full space-y-12 animate-fade-in">
+<div className="flex flex-col items-center justify-center min-h-[100dvh] bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 px-4 py-8 animate-fade-in">
       {/* Quiet Branding */}
       <div className="text-center space-y-3">
         <div className="w-16 h-16 mx-auto bg-white/5 rounded-full border border-white/10 flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.05)] mb-6">

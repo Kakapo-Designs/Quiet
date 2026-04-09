@@ -12,9 +12,10 @@ export default function Layout() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 text-white font-sans pb-24">
+<div className="min-h-[100dvh] bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 text-white font-sans pb-24 relative">
       
-      <main className="container mx-auto px-4 h-[calc(100vh-90px)] pt-8">
+      {/* UPDATED: Ensure main content uses dvh minus nav space */}
+      <main className="container mx-auto px-4 h-[calc(100dvh-90px)] pt-8 overflow-y-auto hide-scrollbar">
         <Outlet />
       </main>
 
