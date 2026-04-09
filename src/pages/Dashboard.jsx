@@ -11,9 +11,13 @@ export default function Dashboard() {
 
   // Timer States
   const [status, setStatus] = useState('idle'); 
-  const [selectedMinutes, setSelectedMinutes] = useState(10); // can be a number or 'unlimited'
-  const [timeValue, setTimeValue] = useState(0); // Holds either timeLeft or timeElapsed
-  const [rewardData, setRewardData] = useState({ streak: 0, message: '', xpEarned: 0 });
+  const [selectedMinutes, setSelectedMinutes] = useState(10);
+  const [timeValue, setTimeValue] = useState(0); 
+  const [rewardData, setRewardData] = useState({ streak: 0, message: '', xpEarned: 0, didLevelUp: false });
+
+  // Goal Editing States
+  const [isEditingGoal, setIsEditingGoal] = useState(false);
+  const [newGoalValue, setNewGoalValue] = useState(10);
 
   // 1. Listen to User Data
   useEffect(() => {
@@ -33,13 +37,16 @@ export default function Dashboard() {
         });
         
         // Default to their target goal initially
-        if (status === 'idle' && selectedMinutes === 10) setSelectedMinutes(data.dailyGoalMinutes || 10);
+        if (status === 'idle' && selectedMinutes === 10) {
+            setSelectedMinutes(data.dailyGoalMinutes || 10);
+            setNewGoalValue(data.dailyGoalMinutes || 10);
+        }
       }
     });
     return () => unsub();
   }, [currentUser]);
 
-  // 2. The Universal Timer Engine (Handles Countdown AND Stopwatch)
+  // 2. The Universal Timer Engine
   useEffect(() => {
     let interval;
     if (status === 'running') {
@@ -64,7 +71,7 @@ export default function Dashboard() {
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
     const s = (seconds % 60).toString().padStart(2, '0');
-    return selectedMinutes === 'unlimited' ? `${m}:${s}` : `${m}:${s}`;
+    return `${m}:${s}`;
   };
 
   const fireConfetti = () => {
@@ -75,6 +82,17 @@ export default function Dashboard() {
       if (Date.now() < end) requestAnimationFrame(frame);
     };
     frame();
+  };
+
+  const handleSaveGoal = async () => {
+    if (newGoalValue < 1) return;
+    try {
+      await updateDoc(doc(db, 'users', currentUser.uid), { dailyGoalMinutes: parseInt(newGoalValue) });
+      setIsEditingGoal(false);
+      setSelectedMinutes(parseInt(newGoalValue));
+    } catch (err) {
+      console.error("Error updating goal:", err);
+    }
   };
 
   const handleSessionEnd = async (completed) => {
@@ -112,6 +130,11 @@ export default function Dashboard() {
       let newTodayMinutes = isSameDay ? (dbData.todayMinutes || 0) + minutesCompleted : minutesCompleted;
       let newTotalXP = (dbData.totalXP || 0) + xpEarned;
 
+      // Level up logic
+      const oldLevel = Math.floor((dbData.totalXP || 0) / 500) + 1;
+      const newLevel = Math.floor(newTotalXP / 500) + 1;
+      const didLevelUp = newLevel > oldLevel;
+
       if (!isSameDay) {
         if (isYesterday) newStreak += 1;
         else if (lastDate) newStreak = 1; 
@@ -121,8 +144,9 @@ export default function Dashboard() {
       let msg = "Peace achieved.";
       if (newTodayMinutes >= dbData.dailyGoalMinutes) msg = "Daily goal reached! Excellent work.";
       if (selectedMinutes === 'unlimited') msg = "Deep focus. Excellent journey.";
+      if (didLevelUp) msg = `Level ${newLevel} Reached! Incredible focus.`;
 
-      setRewardData({ streak: newStreak, message: msg, xpEarned });
+      setRewardData({ streak: newStreak, message: msg, xpEarned, didLevelUp });
       fireConfetti();
 
       await updateDoc(userRef, {
@@ -146,7 +170,7 @@ export default function Dashboard() {
   const ringOffset = ringCircumference - (progressPercent / 100) * ringCircumference;
   const minutesRemaining = Math.max(userData.dailyGoalMinutes - userData.todayMinutes, 0);
 
-  // DYNAMIC GOAL BLOCKS (Scales based on user's personal goal)
+  // DYNAMIC GOAL BLOCKS
   const goal = userData.dailyGoalMinutes;
   const dynamicBlocks = [
     { label: "Quick", val: Math.max(1, Math.round(goal * 0.25)), color: "text-slate-400" },
@@ -156,15 +180,45 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="flex flex-col items-center justify-start h-full space-y-6 pt-4 animate-fade-in pb-10">
+    <div className="flex flex-col items-center justify-start h-full space-y-6 pt-4 animate-fade-in pb-10 relative">
+      
+      {/* Dynamic Background Gradient (Scales with goal progress) */}
+      <div 
+        className="absolute inset-0 pointer-events-none transition-all duration-1000 ease-in-out -z-10"
+        style={{ 
+          background: `radial-gradient(circle at center, rgba(99, 102, 241, ${progressPercent * 0.0015}) 0%, transparent 70%)` 
+        }}
+      />
+
       <div className="text-center">
         <h1 className="text-3xl font-light text-white tracking-[0.2em] mb-2 uppercase">
           {status === 'idle' ? "Focus" : status === 'running' ? "Breathe" : status === 'paused' ? "Paused" : status === 'confirm_quit' ? "End Early?" : "Complete"}
         </h1>
         {status === 'idle' && (
-          <p className="text-slate-400 font-light text-sm tracking-wide">
-            {minutesRemaining > 0 ? `${minutesRemaining} min left to reach your daily goal.` : "Daily goal achieved. Going for extra credit?"}
-          </p>
+          <div className="flex flex-col items-center">
+            {isEditingGoal ? (
+              <div className="flex items-center space-x-2 mt-1 animate-fade-in">
+                <input 
+                  type="number" 
+                  value={newGoalValue} 
+                  onChange={(e) => setNewGoalValue(e.target.value)}
+                  className="w-16 bg-black/30 border border-white/20 rounded px-2 py-1 text-white text-center font-light focus:outline-none"
+                  autoFocus
+                />
+                <button onClick={handleSaveGoal} className="text-xs text-indigo-400 uppercase tracking-widest px-2 hover:text-indigo-300">Save</button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => {
+                  setNewGoalValue(userData.dailyGoalMinutes);
+                  setIsEditingGoal(true);
+                }}
+                className="text-slate-400 font-light text-sm tracking-wide hover:text-white transition-colors flex items-center space-x-1"
+              >
+                <span>{minutesRemaining > 0 ? `${minutesRemaining} min left to reach your daily goal.` : "Daily goal achieved. Going for extra credit?"}</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -173,8 +227,8 @@ export default function Dashboard() {
 
         {status === 'completed' ? (
           <div className="flex flex-col items-center text-center animate-slide-up w-full py-8">
-            <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-1 rounded-full mb-6">
-               <div className="bg-slate-900 p-5 rounded-full"><Check size={48} className="text-indigo-400" /></div>
+            <div className={`bg-gradient-to-br ${rewardData.didLevelUp ? 'from-yellow-400 to-orange-500' : 'from-indigo-500 to-purple-600'} p-1 rounded-full mb-6`}>
+               <div className="bg-slate-900 p-5 rounded-full"><Check size={48} className={rewardData.didLevelUp ? "text-yellow-400" : "text-indigo-400"} /></div>
             </div>
             <h2 className="text-2xl text-white font-light tracking-wide mb-2">{rewardData.message}</h2>
             
@@ -195,20 +249,37 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <button onClick={() => setStatus('idle')} className="w-full bg-white/10 hover:bg-white/20 text-white font-light tracking-widest py-4 rounded-2xl uppercase">Continue</button>
+            <button onClick={() => setStatus('idle')} className="w-full bg-white/10 hover:bg-white/20 text-white font-light tracking-widest py-4 rounded-2xl uppercase transition-colors">Continue</button>
           </div>
         ) : (
           <>
             <div className="relative flex items-center justify-center w-64 h-64 mb-8 mt-4">
-              <svg className="absolute inset-0 w-full h-full transform -rotate-90 pointer-events-none">
+              {/* Added viewBox to fix shifting and clipping issues */}
+              <svg viewBox="0 0 256 256" className="absolute inset-0 w-full h-full transform -rotate-90 pointer-events-none">
                 <circle cx="128" cy="128" r={ringRadius} stroke="currentColor" strokeWidth="6" fill="transparent" className="text-white/5" />
                 <circle cx="128" cy="128" r={ringRadius} stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray={ringCircumference} strokeDashoffset={ringOffset} strokeLinecap="round" className={`transition-all duration-1000 ease-out ${progressPercent >= 100 ? 'text-green-400 drop-shadow-[0_0_10px_rgba(74,222,128,0.5)]' : 'text-indigo-500 drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]'}`}/>
               </svg>
-              <div className={`text-6xl font-light tracking-tighter transition-all duration-500 ${status === 'running' ? 'text-white' : 'text-slate-300'}`}>
+              <div className={`text-6xl font-light tracking-tighter transition-all duration-500 z-10 ${status === 'running' ? 'text-white' : 'text-slate-300'}`}>
                 {formatTime(timeValue)}
               </div>
-              {selectedMinutes === 'unlimited' && status === 'running' && <div className="absolute bottom-10 text-pink-400 animate-pulse"><InfinityIcon size={24} /></div>}
+              {selectedMinutes === 'unlimited' && status === 'running' && <div className="absolute bottom-10 text-pink-400 animate-pulse z-10"><InfinityIcon size={24} /></div>}
             </div>
+
+            {/* Dashboard XP Bar */}
+            {status === 'idle' && (
+              <div className="w-full px-2 mb-6 animate-fade-in">
+                <div className="flex justify-between text-[10px] text-slate-400 mb-2 uppercase tracking-widest font-light">
+                  <span>Lvl {Math.floor((userData.totalXP || 0) / 500) + 1}</span>
+                  <span>{userData.totalXP || 0} / {(Math.floor((userData.totalXP || 0) / 500) + 1) * 500} XP</span>
+                </div>
+                <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5">
+                  <div 
+                    className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-1000"
+                    style={{ width: `${((userData.totalXP || 0) % 500) / 500 * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
 
             {status === 'idle' && (
               <div className="flex flex-col items-center space-y-6 w-full animate-fade-in">
@@ -226,16 +297,16 @@ export default function Dashboard() {
                     </button>
                   ))}
                 </div>
-                <button onClick={() => setStatus('running')} className="w-full bg-indigo-500/80 hover:bg-indigo-500 text-white rounded-[2rem] py-5 text-lg font-light tracking-widest uppercase shadow-[0_0_20px_rgba(99,102,241,0.2)] flex items-center justify-center space-x-3 mt-2">
+                <button onClick={() => setStatus('running')} className="w-full bg-indigo-500/80 hover:bg-indigo-500 text-white rounded-[2rem] py-5 text-lg font-light tracking-widest uppercase shadow-[0_0_20px_rgba(99,102,241,0.2)] flex items-center justify-center space-x-3 mt-2 transition-all">
                   <Play fill="currentColor" size={20} /><span>Begin</span>
                 </button>
               </div>
             )}
 
             {(status === 'running' || status === 'paused') && (
-              <div className="flex space-x-6 w-full justify-center">
-                {status === 'running' ? <button onClick={() => setStatus('paused')} className="bg-white/5 border border-white/10 text-white p-6 rounded-full"><Pause size={28} /></button> : <button onClick={() => setStatus('running')} className="bg-indigo-500/20 border border-indigo-500/50 text-indigo-300 p-6 rounded-full"><Play size={28} /></button>}
-                <button onClick={() => selectedMinutes === 'unlimited' ? handleSessionEnd(true) : setStatus('confirm_quit')} className="bg-red-500/10 border border-red-500/30 text-red-400 p-6 rounded-full">
+              <div className="flex space-x-6 w-full justify-center animate-slide-up">
+                {status === 'running' ? <button onClick={() => setStatus('paused')} className="bg-white/5 border border-white/10 text-white p-6 rounded-full hover:bg-white/10 transition-colors"><Pause size={28} /></button> : <button onClick={() => setStatus('running')} className="bg-indigo-500/20 border border-indigo-500/50 text-indigo-300 p-6 rounded-full hover:bg-indigo-500/30 transition-colors"><Play size={28} /></button>}
+                <button onClick={() => selectedMinutes === 'unlimited' ? handleSessionEnd(true) : setStatus('confirm_quit')} className="bg-red-500/10 border border-red-500/30 text-red-400 p-6 rounded-full hover:bg-red-500/20 transition-colors">
                   <Square fill="currentColor" size={28} />
                 </button>
               </div>
@@ -245,8 +316,8 @@ export default function Dashboard() {
               <div className="flex flex-col items-center space-y-6 w-full animate-fade-in">
                 <p className="text-slate-400 text-center text-sm font-light px-4">End early? The minutes you've completed will still be saved.</p>
                 <div className="flex space-x-4 w-full">
-                  <button onClick={() => handleSessionEnd(false)} className="flex-1 bg-red-500/10 border border-red-500/30 text-red-400 py-4 rounded-2xl">End</button>
-                  <button onClick={() => setStatus('paused')} className="flex-1 bg-white/10 text-white py-4 rounded-2xl">Cancel</button>
+                  <button onClick={() => handleSessionEnd(false)} className="flex-1 bg-red-500/10 border border-red-500/30 text-red-400 py-4 rounded-2xl hover:bg-red-500/20 transition-colors">End</button>
+                  <button onClick={() => setStatus('paused')} className="flex-1 bg-white/10 text-white py-4 rounded-2xl hover:bg-white/20 transition-colors">Cancel</button>
                 </div>
               </div>
             )}

@@ -33,7 +33,8 @@ export default function Auth() {
           unlockedTitles: ['novice'],
           equippedTitle: 'novice',
           friends: [],
-          lastMeditationDate: null
+          lastMeditationDate: null,
+          totalXP: 0 // Added base totalXP
         });
       }
     } catch (err) {
@@ -44,9 +45,9 @@ export default function Auth() {
   };
 
   return (
-<div className="flex flex-col items-center justify-center min-h-[100dvh] bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 px-4 py-8 animate-fade-in">
+    <div className="flex flex-col items-center justify-center min-h-[100dvh] bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 px-4 py-8 animate-fade-in">
       {/* Quiet Branding */}
-      <div className="text-center space-y-3">
+      <div className="text-center space-y-3 mb-12"> {/* <-- Added mb-12 here for spacing */}
         <div className="w-16 h-16 mx-auto bg-white/5 rounded-full border border-white/10 flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.05)] mb-6">
            <div className="w-6 h-6 bg-indigo-400 rounded-full animate-pulse"></div>
         </div>
