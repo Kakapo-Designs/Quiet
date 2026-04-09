@@ -193,33 +193,46 @@ export default function Profile() {
       {/* --- TAB CONTENT: JOURNEY --- */}
       {activeTab === 'journey' && (
         <div className="w-full max-w-sm space-y-6 animate-slide-up">
-          {/* Identity Card */}
+          
+          {/* Identity & Level Card */}
           <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 p-8 rounded-[2rem] shadow-2xl flex flex-col items-center relative">
+            
+            {/* Avatar Upload */}
             <div className="relative group cursor-pointer mb-4" onClick={() => fileInputRef.current.click()}>
-              <div className="w-32 h-32 rounded-full overflow-hidden border border-white/10 bg-black/40 flex items-center justify-center">
-                {userData.photoURL ? (
-                  <img src={userData.photoURL} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <UserIcon size={48} className="text-slate-600" />
-                )}
+              <div className="w-32 h-32 rounded-full overflow-hidden border border-white/10 bg-black/40 flex items-center justify-center relative z-10">
+                {userData.photoURL ? <img src={userData.photoURL} alt="Profile" className="w-full h-full object-cover" /> : <UserIcon size={48} className="text-slate-600" />}
               </div>
-              <div className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <Upload className="text-white mb-1" size={20} />
+              <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20">
                 <span className="text-white text-xs font-light tracking-widest">EDIT</span>
               </div>
-              {isUploading && (
-                <div className="absolute inset-0 bg-black/80 rounded-full flex items-center justify-center">
-                  <span className="text-indigo-400 text-xs animate-pulse tracking-widest">SAVING...</span>
-                </div>
-              )}
+              
+              {/* Level Badge Overlay */}
+              <div className="absolute -bottom-2 right-0 bg-indigo-500 border-4 border-slate-900 w-10 h-10 rounded-full flex items-center justify-center z-30 shadow-lg">
+                 <span className="text-white font-bold text-sm">{Math.floor((userData.totalXP || 0) / 500) + 1}</span>
+              </div>
             </div>
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
 
             <h2 className="text-2xl font-light text-white mb-1">{userData.displayName || 'Zen User'}</h2>
-            <div className={`px-4 py-1 rounded-full bg-gradient-to-r ${activeTitle.gradient} shadow-lg mb-6 opacity-90`}>
-              <span className="text-white text-xs font-bold tracking-widest uppercase">{activeTitle.name}</span>
+            <div className={`px-4 py-1 rounded-full bg-gradient-to-r ${activeTitle.gradient} shadow-lg mb-8 opacity-90`}>
+              <span className="text-white text-[10px] font-bold tracking-widest uppercase">{activeTitle.name}</span>
             </div>
 
+            {/* DUOLINGO STYLE XP BAR */}
+            <div className="w-full mb-6">
+              <div className="flex justify-between text-xs text-slate-400 mb-2 uppercase tracking-widest font-light">
+                <span>Lvl {Math.floor((userData.totalXP || 0) / 500) + 1}</span>
+                <span>{userData.totalXP || 0} / {(Math.floor((userData.totalXP || 0) / 500) + 1) * 500} XP</span>
+              </div>
+              <div className="w-full h-3 bg-black/40 rounded-full overflow-hidden border border-white/5">
+                <div 
+                  className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-1000"
+                  style={{ width: `${((userData.totalXP || 0) % 500) / 500 * 100}%` }}
+                ></div>
+              </div>
+            </div>
+
+            {/* Stats Row */}
             <div className="flex w-full justify-around bg-black/20 rounded-2xl p-4 border border-white/5">
               <div className="text-center">
                 <p className="text-3xl font-light text-white">{userData.currentStreak || 0}</p>
@@ -227,11 +240,13 @@ export default function Profile() {
               </div>
               <div className="w-px bg-white/5"></div>
               <div className="text-center">
-                <p className="text-3xl font-light text-white">{userData.longestStreak || 0}</p>
-                <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Best Streak</p>
+                <p className="text-3xl font-light text-white">{userData.todayMinutes || 0}</p>
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Mins Today</p>
               </div>
             </div>
           </div>
+
+
 
           {/* Cosmetics */}
           <div className="space-y-4">

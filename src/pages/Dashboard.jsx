@@ -1,251 +1,241 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase/config';
-import { collection, addDoc, doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
-import { Play, Pause, Square, Check, Flame } from 'lucide-react';
+import { collection, addDoc, doc, updateDoc, getDoc, onSnapshot } from 'firebase/firestore';
+import { Play, Pause, Square, Check, Flame, Infinity as InfinityIcon, Zap } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 export default function Dashboard() {
   const { currentUser } = useAuth();
-  
-  // States
-  const [status, setStatus] = useState('idle'); // idle, running, paused, confirm_quit, completed
-  const [selectedMinutes, setSelectedMinutes] = useState(10);
-  const [timeLeft, setTimeLeft] = useState(selectedMinutes * 60);
-  const [rewardData, setRewardData] = useState({ streak: 0, message: '', unlocked: [] });
+  const [userData, setUserData] = useState(null);
 
-  // Time Formatting
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
-  };
+  // Timer States
+  const [status, setStatus] = useState('idle'); 
+  const [selectedMinutes, setSelectedMinutes] = useState(10); // can be a number or 'unlimited'
+  const [timeValue, setTimeValue] = useState(0); // Holds either timeLeft or timeElapsed
+  const [rewardData, setRewardData] = useState({ streak: 0, message: '', xpEarned: 0 });
 
-  // Timer Logic
+  // 1. Listen to User Data
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsub = onSnapshot(doc(db, 'users', currentUser.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const now = new Date();
+        const lastDate = data.lastMeditationDate ? data.lastMeditationDate.toDate() : null;
+        const isSameDay = lastDate && lastDate.getDate() === now.getDate() && lastDate.getMonth() === now.getMonth() && lastDate.getFullYear() === now.getFullYear();
+
+        setUserData({
+          ...data,
+          todayMinutes: isSameDay ? (data.todayMinutes || 0) : 0,
+          dailyGoalMinutes: data.dailyGoalMinutes || 10,
+          totalXP: data.totalXP || 0
+        });
+        
+        // Default to their target goal initially
+        if (status === 'idle' && selectedMinutes === 10) setSelectedMinutes(data.dailyGoalMinutes || 10);
+      }
+    });
+    return () => unsub();
+  }, [currentUser]);
+
+  // 2. The Universal Timer Engine (Handles Countdown AND Stopwatch)
   useEffect(() => {
     let interval;
-    if (status === 'running' && timeLeft > 0) {
+    if (status === 'running') {
       interval = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
+        setTimeValue((prev) => selectedMinutes === 'unlimited' ? prev + 1 : prev - 1);
       }, 1000);
-    } else if (status === 'running' && timeLeft === 0) {
+    }
+
+    if (status === 'running' && selectedMinutes !== 'unlimited' && timeValue <= 0) {
       handleSessionEnd(true);
     }
     return () => clearInterval(interval);
-  }, [status, timeLeft]);
+  }, [status, timeValue, selectedMinutes]);
 
+  // Reset timer when selecting a new block while idle
   useEffect(() => {
-    if (status === 'idle') setTimeLeft(selectedMinutes * 60);
+    if (status === 'idle') {
+      setTimeValue(selectedMinutes === 'unlimited' ? 0 : selectedMinutes * 60);
+    }
   }, [selectedMinutes, status]);
 
-  const handleStart = () => setStatus('running');
-  const handlePause = () => setStatus('paused');
-  const handleResume = () => setStatus('running');
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return selectedMinutes === 'unlimited' ? `${m}:${s}` : `${m}:${s}`;
+  };
 
-  // Trigger the tactile confetti burst
   const fireConfetti = () => {
-    const duration = 3000;
-    const end = Date.now() + duration;
-
+    const duration = 3000; const end = Date.now() + duration;
     const frame = () => {
-      confetti({
-        particleCount: 5,
-        angle: 60,
-        spread: 55,
-        origin: { x: 0 },
-        colors: ['#818cf8', '#c084fc', '#ffffff'] // Quiet branding colors
-      });
-      confetti({
-        particleCount: 5,
-        angle: 120,
-        spread: 55,
-        origin: { x: 1 },
-        colors: ['#818cf8', '#c084fc', '#ffffff']
-      });
+      confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#818cf8', '#c084fc', '#ffffff'] });
+      confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#818cf8', '#c084fc', '#ffffff'] });
       if (Date.now() < end) requestAnimationFrame(frame);
     };
     frame();
   };
 
-  // Database & Gamification Engine
   const handleSessionEnd = async (completed) => {
-    setStatus(completed ? 'completed' : 'idle');
-    const minutesCompleted = completed ? selectedMinutes : Math.round((selectedMinutes * 60 - timeLeft) / 60);
+    setStatus('completed');
+    
+    // Calculate minutes based on mode
+    let minutesCompleted = 0;
+    if (selectedMinutes === 'unlimited') {
+      minutesCompleted = Math.floor(timeValue / 60);
+    } else {
+      minutesCompleted = completed ? selectedMinutes : Math.round((selectedMinutes * 60 - timeValue) / 60);
+    }
+
+    if (minutesCompleted === 0) {
+      setStatus('idle');
+      setTimeValue(selectedMinutes === 'unlimited' ? 0 : selectedMinutes * 60);
+      return; 
+    }
+
+    const xpEarned = minutesCompleted * 10; // 10 XP per minute
 
     try {
-      // 1. Log the session
-      await addDoc(collection(db, 'sessions'), {
-        userId: currentUser.uid,
-        date: new Date(),
-        durationMinutes: minutesCompleted,
-        completed: completed
+      await addDoc(collection(db, 'sessions'), { userId: currentUser.uid, date: new Date(), durationMinutes: minutesCompleted, completed: completed || selectedMinutes === 'unlimited' });
+
+      const userRef = doc(db, 'users', currentUser.uid);
+      const userSnap = await getDoc(userRef);
+      const dbData = userSnap.data();
+
+      const now = new Date();
+      const lastDate = dbData.lastMeditationDate ? dbData.lastMeditationDate.toDate() : null;
+      const isSameDay = lastDate && lastDate.getDate() === now.getDate() && lastDate.getMonth() === now.getMonth() && lastDate.getFullYear() === now.getFullYear();
+      const isYesterday = lastDate && (now - lastDate) / (1000 * 60 * 60) > 24 && (now - lastDate) / (1000 * 60 * 60) < 48;
+
+      let newStreak = dbData.currentStreak || 0;
+      let newTodayMinutes = isSameDay ? (dbData.todayMinutes || 0) + minutesCompleted : minutesCompleted;
+      let newTotalXP = (dbData.totalXP || 0) + xpEarned;
+
+      if (!isSameDay) {
+        if (isYesterday) newStreak += 1;
+        else if (lastDate) newStreak = 1; 
+        else newStreak = 1; 
+      }
+
+      let msg = "Peace achieved.";
+      if (newTodayMinutes >= dbData.dailyGoalMinutes) msg = "Daily goal reached! Excellent work.";
+      if (selectedMinutes === 'unlimited') msg = "Deep focus. Excellent journey.";
+
+      setRewardData({ streak: newStreak, message: msg, xpEarned });
+      fireConfetti();
+
+      await updateDoc(userRef, {
+        currentStreak: newStreak,
+        longestStreak: Math.max(newStreak, dbData.longestStreak || 0),
+        lastMeditationDate: now,
+        todayMinutes: newTodayMinutes,
+        totalXP: newTotalXP
       });
 
-      if (completed) {
-        // 2. Fetch current user stats to calculate streaks
-        const userRef = doc(db, 'users', currentUser.uid);
-        const userSnap = await getDoc(userRef);
-        const userData = userSnap.data();
-
-        let newStreak = userData.currentStreak || 0;
-        const now = new Date();
-        const lastDate = userData.lastMeditationDate ? userData.lastMeditationDate.toDate() : null;
-        
-        // Date math to check if they meditated yesterday, today, or missed a day
-        if (lastDate) {
-          const hoursSinceLast = (now - lastDate) / (1000 * 60 * 60);
-          if (hoursSinceLast > 24 && hoursSinceLast < 48) {
-            newStreak += 1; // Meditated yesterday
-          } else if (hoursSinceLast >= 48) {
-            newStreak = 1; // Missed a day, reset
-          }
-          // If hoursSinceLast < 24, they already meditated today, streak stays the same.
-        } else {
-          newStreak = 1; // First time meditating
-        }
-
-        const newLongest = Math.max(newStreak, userData.longestStreak || 0);
-        
-        // 3. Check for Title Unlocks
-        let unlocked = [...(userData.unlockedTitles || ['novice'])];
-        let newUnlocks = [];
-        
-        if (newStreak >= 3 && !unlocked.includes('mindful')) {
-          unlocked.push('mindful');
-          newUnlocks.push('Mindful Soul');
-        }
-        if (newStreak >= 30 && !unlocked.includes('zen_master')) {
-          unlocked.push('zen_master');
-          newUnlocks.push('Zen Master');
-        }
-        if (minutesCompleted >= 60 && !unlocked.includes('void_walker')) {
-          unlocked.push('void_walker');
-          newUnlocks.push('Void Walker');
-        }
-
-        // 4. Determine Encouragement Message
-        let msg = "Peace achieved.";
-        if (newStreak === 3) msg = "Three days in a row! You're building a habit.";
-        if (newStreak === 7) msg = "One full week. Incredible dedication.";
-        if (newStreak > 7 && newStreak % 5 === 0) msg = `Unstoppable! ${newStreak} days of focus.`;
-        if (newUnlocks.length > 0) msg = `Title Unlocked: ${newUnlocks[0]}!`;
-
-        setRewardData({ streak: newStreak, message: msg, unlocked: newUnlocks });
-
-        // 5. Update User Profile in DB
-        await updateDoc(userRef, {
-          currentStreak: newStreak,
-          longestStreak: newLongest,
-          unlockedTitles: unlocked,
-          lastMeditationDate: now
-        });
-
-        // 6. Celebrate!
-        fireConfetti();
-      } else {
-        setTimeLeft(selectedMinutes * 60);
-      }
     } catch (err) {
       console.error("Error saving session:", err);
     }
   };
 
-  const handleReset = () => {
-    setStatus('idle');
-    setTimeLeft(selectedMinutes * 60);
-  };
+  if (!userData) return <div className="text-center text-white mt-20">Loading space...</div>;
+
+  const ringRadius = 110;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const progressPercent = Math.min((userData.todayMinutes / userData.dailyGoalMinutes) * 100, 100);
+  const ringOffset = ringCircumference - (progressPercent / 100) * ringCircumference;
+  const minutesRemaining = Math.max(userData.dailyGoalMinutes - userData.todayMinutes, 0);
+
+  // DYNAMIC GOAL BLOCKS (Scales based on user's personal goal)
+  const goal = userData.dailyGoalMinutes;
+  const dynamicBlocks = [
+    { label: "Quick", val: Math.max(1, Math.round(goal * 0.25)), color: "text-slate-400" },
+    { label: "Halfway", val: Math.max(2, Math.round(goal * 0.5)), color: "text-indigo-400" },
+    { label: "Target", val: goal, color: "text-purple-400" },
+    { label: "Infinity", val: 'unlimited', color: "text-pink-400" }
+  ];
 
   return (
-    <div className="flex flex-col items-center justify-center h-full space-y-8 animate-fade-in">
-      
-      {/* Dynamic Header */}
+    <div className="flex flex-col items-center justify-start h-full space-y-6 pt-4 animate-fade-in pb-10">
       <div className="text-center">
-        <h1 className="text-3xl font-light text-white tracking-[0.2em] mb-2">
-          {status === 'idle' && "READY"}
-          {(status === 'running' || status === 'paused') && "FOCUS"}
-          {status === 'confirm_quit' && "END EARLY?"}
-          {status === 'completed' && "COMPLETE"}
+        <h1 className="text-3xl font-light text-white tracking-[0.2em] mb-2 uppercase">
+          {status === 'idle' ? "Focus" : status === 'running' ? "Breathe" : status === 'paused' ? "Paused" : status === 'confirm_quit' ? "End Early?" : "Complete"}
         </h1>
+        {status === 'idle' && (
+          <p className="text-slate-400 font-light text-sm tracking-wide">
+            {minutesRemaining > 0 ? `${minutesRemaining} min left to reach your daily goal.` : "Daily goal achieved. Going for extra credit?"}
+          </p>
+        )}
       </div>
 
-      {/* Main Container */}
-      <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 p-10 rounded-[3rem] shadow-2xl w-full max-w-sm flex flex-col items-center justify-center min-h-[420px] transition-all duration-500 relative overflow-hidden">
-        
-        {status === 'running' && (
-          <div className="absolute inset-0 bg-indigo-500/5 animate-pulse rounded-[3rem] pointer-events-none"></div>
-        )}
+      <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/10 p-8 rounded-[3rem] shadow-2xl w-full max-w-sm flex flex-col items-center justify-center transition-all duration-500 relative overflow-hidden">
+        {status === 'running' && <div className="absolute inset-0 bg-indigo-500/5 animate-pulse rounded-[3rem] pointer-events-none"></div>}
 
-        {/* --- REWARD SCREEN --- */}
         {status === 'completed' ? (
-          <div className="flex flex-col items-center text-center animate-slide-up w-full">
-            <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-1 rounded-full mb-6 shadow-[0_0_30px_rgba(129,140,248,0.5)]">
-               <div className="bg-slate-900 p-5 rounded-full">
-                  <Check size={48} className="text-indigo-400" />
-               </div>
+          <div className="flex flex-col items-center text-center animate-slide-up w-full py-8">
+            <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-1 rounded-full mb-6">
+               <div className="bg-slate-900 p-5 rounded-full"><Check size={48} className="text-indigo-400" /></div>
             </div>
-            
             <h2 className="text-2xl text-white font-light tracking-wide mb-2">{rewardData.message}</h2>
             
-            <div className="flex items-center space-x-3 bg-white/5 border border-white/10 px-6 py-3 rounded-2xl mt-6 mb-8">
-              <Flame className="text-orange-400" size={24} />
-              <div className="text-left">
-                <p className="text-white text-xl font-medium leading-none">{rewardData.streak}</p>
-                <p className="text-slate-400 text-[10px] uppercase tracking-widest">Day Streak</p>
+            <div className="flex w-full justify-around mt-6 mb-8">
+              <div className="flex items-center space-x-2 bg-white/5 border border-white/10 px-4 py-3 rounded-2xl">
+                <Flame className="text-orange-400" size={20} />
+                <div className="text-left">
+                  <p className="text-white font-medium leading-none">{rewardData.streak}</p>
+                  <p className="text-slate-400 text-[10px] uppercase tracking-widest">Streak</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 bg-white/5 border border-white/10 px-4 py-3 rounded-2xl">
+                <Zap className="text-yellow-400" size={20} />
+                <div className="text-left">
+                  <p className="text-white font-medium leading-none">+{rewardData.xpEarned}</p>
+                  <p className="text-slate-400 text-[10px] uppercase tracking-widest">Zen XP</p>
+                </div>
               </div>
             </div>
 
-            <button 
-              onClick={handleReset}
-              className="w-full bg-white/10 hover:bg-white/20 text-white font-light tracking-widest py-4 rounded-2xl transition-all uppercase"
-            >
-              Continue
-            </button>
+            <button onClick={() => setStatus('idle')} className="w-full bg-white/10 hover:bg-white/20 text-white font-light tracking-widest py-4 rounded-2xl uppercase">Continue</button>
           </div>
         ) : (
-          /* --- TIMER SCREEN --- */
           <>
-            <div className={`text-7xl font-light tracking-tighter transition-all duration-500 ${status === 'running' ? 'text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]' : 'text-slate-400'} mb-10`}>
-              {formatTime(timeLeft)}
+            <div className="relative flex items-center justify-center w-64 h-64 mb-8 mt-4">
+              <svg className="absolute inset-0 w-full h-full transform -rotate-90 pointer-events-none">
+                <circle cx="128" cy="128" r={ringRadius} stroke="currentColor" strokeWidth="6" fill="transparent" className="text-white/5" />
+                <circle cx="128" cy="128" r={ringRadius} stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray={ringCircumference} strokeDashoffset={ringOffset} strokeLinecap="round" className={`transition-all duration-1000 ease-out ${progressPercent >= 100 ? 'text-green-400 drop-shadow-[0_0_10px_rgba(74,222,128,0.5)]' : 'text-indigo-500 drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]'}`}/>
+              </svg>
+              <div className={`text-6xl font-light tracking-tighter transition-all duration-500 ${status === 'running' ? 'text-white' : 'text-slate-300'}`}>
+                {formatTime(timeValue)}
+              </div>
+              {selectedMinutes === 'unlimited' && status === 'running' && <div className="absolute bottom-10 text-pink-400 animate-pulse"><InfinityIcon size={24} /></div>}
             </div>
 
             {status === 'idle' && (
-              <div className="flex flex-col items-center space-y-8 w-full">
-                <select 
-                  value={selectedMinutes}
-                  onChange={(e) => setSelectedMinutes(Number(e.target.value))}
-                  className="bg-black/20 border border-white/5 text-white rounded-xl px-6 py-3 outline-none focus:ring-2 focus:ring-indigo-500 appearance-none text-center w-3/4 font-light tracking-wide cursor-pointer"
-                >
-                  <option value={1} className="text-black">1 Minute</option>
-                  <option value={5} className="text-black">5 Minutes</option>
-                  <option value={10} className="text-black">10 Minutes</option>
-                  <option value={15} className="text-black">15 Minutes</option>
-                  <option value={30} className="text-black">30 Minutes</option>
-                  <option value={60} className="text-black">60 Minutes</option>
-                </select>
-
-                <button 
-                  onClick={handleStart}
-                  className="w-full bg-indigo-500/80 hover:bg-indigo-500 text-white rounded-[2rem] py-5 text-lg font-light tracking-widest uppercase shadow-[0_0_20px_rgba(99,102,241,0.2)] hover:shadow-[0_0_30px_rgba(99,102,241,0.4)] transition-all flex items-center justify-center space-x-3"
-                >
-                  <Play fill="currentColor" size={20} />
-                  <span>Begin</span>
+              <div className="flex flex-col items-center space-y-6 w-full animate-fade-in">
+                <div className="grid grid-cols-2 gap-3 w-full">
+                  {dynamicBlocks.map((block, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedMinutes(block.val)}
+                      className={`py-4 rounded-2xl border transition-all flex flex-col items-center justify-center space-y-1 ${
+                        selectedMinutes === block.val ? 'bg-indigo-500/20 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.15)]' : 'bg-black/20 border-white/5 hover:bg-white/5'
+                      }`}
+                    >
+                      {block.val === 'unlimited' ? <InfinityIcon size={24} className={block.color} /> : <span className={`text-xl font-light leading-none ${selectedMinutes === block.val ? 'text-white' : block.color}`}>{block.val}</span>}
+                      <span className="text-[10px] tracking-widest uppercase text-slate-500">{block.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setStatus('running')} className="w-full bg-indigo-500/80 hover:bg-indigo-500 text-white rounded-[2rem] py-5 text-lg font-light tracking-widest uppercase shadow-[0_0_20px_rgba(99,102,241,0.2)] flex items-center justify-center space-x-3 mt-2">
+                  <Play fill="currentColor" size={20} /><span>Begin</span>
                 </button>
               </div>
             )}
 
             {(status === 'running' || status === 'paused') && (
               <div className="flex space-x-6 w-full justify-center">
-                {status === 'running' ? (
-                  <button onClick={handlePause} className="bg-white/5 hover:bg-white/10 border border-white/10 text-white p-6 rounded-full transition-all">
-                    <Pause fill="currentColor" size={28} />
-                  </button>
-                ) : (
-                  <button onClick={handleResume} className="bg-indigo-500/20 hover:bg-indigo-500/40 border border-indigo-500/50 text-indigo-300 p-6 rounded-full transition-all">
-                    <Play fill="currentColor" size={28} />
-                  </button>
-                )}
-                
-                <button onClick={() => setStatus('confirm_quit')} className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 p-6 rounded-full transition-all">
+                {status === 'running' ? <button onClick={() => setStatus('paused')} className="bg-white/5 border border-white/10 text-white p-6 rounded-full"><Pause size={28} /></button> : <button onClick={() => setStatus('running')} className="bg-indigo-500/20 border border-indigo-500/50 text-indigo-300 p-6 rounded-full"><Play size={28} /></button>}
+                <button onClick={() => selectedMinutes === 'unlimited' ? handleSessionEnd(true) : setStatus('confirm_quit')} className="bg-red-500/10 border border-red-500/30 text-red-400 p-6 rounded-full">
                   <Square fill="currentColor" size={28} />
                 </button>
               </div>
@@ -253,16 +243,10 @@ export default function Dashboard() {
 
             {status === 'confirm_quit' && (
               <div className="flex flex-col items-center space-y-6 w-full animate-fade-in">
-                <p className="text-slate-400 text-center text-sm font-light leading-relaxed px-4">
-                  Are you sure you want to end early?<br/>This session won't count towards your streak.
-                </p>
+                <p className="text-slate-400 text-center text-sm font-light px-4">End early? The minutes you've completed will still be saved.</p>
                 <div className="flex space-x-4 w-full">
-                  <button onClick={() => handleSessionEnd(false)} className="flex-1 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 py-4 rounded-2xl transition-all font-light tracking-wide">
-                    End
-                  </button>
-                  <button onClick={() => setStatus('paused')} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-4 rounded-2xl transition-all font-light tracking-wide">
-                    Cancel
-                  </button>
+                  <button onClick={() => handleSessionEnd(false)} className="flex-1 bg-red-500/10 border border-red-500/30 text-red-400 py-4 rounded-2xl">End</button>
+                  <button onClick={() => setStatus('paused')} className="flex-1 bg-white/10 text-white py-4 rounded-2xl">Cancel</button>
                 </div>
               </div>
             )}
